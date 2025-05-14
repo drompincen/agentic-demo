@@ -1,0 +1,40 @@
+[ {
+  "reporter" : "pm@example.com",
+  "status" : "To Do",
+  "id" : "ALPHA-101",
+  "comments" : [ ],
+  "summary" : "Implement user login feature",
+  "labels" : [ "auth", "frontend" ],
+  "transitions" : [ ],
+  "needsGrooming" : false,
+  "projectKey" : "ALPHA",
+  "description" : "User should be able to login with email and password. Acceptance Criteria: 1. Valid credentials grant access. 2. Invalid credentials show error. 3. Password reset link available.",
+  "assignee" : "developer1@example.com",
+  "storyPoints" : 5
+}, {
+  "reporter" : "customer_support@example.com",
+  "status" : "Open",
+  "id" : "ALPHA-102",
+  "comments" : [ ],
+  "summary" : "Fix critical bug in payment module",
+  "labels" : [ "bug", "payments", "critical" ],
+  "transitions" : [ ],
+  "needsGrooming" : false,
+  "projectKey" : "ALPHA",
+  "description" : "Payment fails for users in EU region.",
+  "assignee" : "",
+  "storyPoints" : 0
+}, {
+  "reporter" : "lead_dev@example.com",
+  "status" : "To Do",
+  "id" : "BETA-001",
+  "comments" : [ ],
+  "summary" : "Setup CI/CD pipeline",
+  "labels" : [ "devops", "infra" ],
+  "transitions" : [ ],
+  "needsGrooming" : false,
+  "projectKey" : "BETA",
+  "description" : "Automate build, test, and deployment for the Beta project.",
+  "assignee" : "devops@example.com",
+  "storyPoints" : 8
+} ]

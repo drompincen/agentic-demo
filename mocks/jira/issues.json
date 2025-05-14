@@ -1,0 +1,44 @@
+[
+  {
+    "id": "ALPHA-101",
+    "projectKey": "ALPHA",
+    "summary": "Implement user login feature",
+    "description": "User should be able to login with email and password. Acceptance Criteria: 1. Valid credentials grant access. 2. Invalid credentials show error. 3. Password reset link available.",
+    "status": "To Do",
+    "assignee": "developer1@example.com",
+    "reporter": "pm@example.com",
+    "storyPoints": 5,
+    "labels": ["auth", "frontend"],
+    "needsGrooming": true,
+    "comments": [],
+    "transitions": []
+  },
+  {
+    "id": "ALPHA-102",
+    "projectKey": "ALPHA",
+    "summary": "Fix critical bug in payment module",
+    "description": "Payment fails for users in EU region.",
+    "status": "Open",
+    "assignee": "",
+    "reporter": "customer_support@example.com",
+    "storyPoints": 0,
+    "labels": ["bug", "payments", "critical"],
+    "needsGrooming": true,
+    "comments": [],
+    "transitions": []
+  },
+  {
+    "id": "BETA-001",
+    "projectKey": "BETA",
+    "summary": "Setup CI/CD pipeline",
+    "description": "Automate build, test, and deployment for the Beta project.",
+    "status": "To Do",
+    "assignee": "devops@example.com",
+    "reporter": "lead_dev@example.com",
+    "storyPoints": 8,
+    "labels": ["devops", "infra"],
+    "needsGrooming": false,
+    "comments": [],
+    "transitions": []
+  }
+]
