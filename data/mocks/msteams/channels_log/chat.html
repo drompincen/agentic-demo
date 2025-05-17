@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Styled Chat - Goldman Sachs Blue</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Segoe UI", Roboto, Arial, sans-serif;
+            margin: 0;
+            background-color: #ffffff;
+            display: flex;
+            justify-content: center;
+            padding: 0;
+            min-height: 100vh;
+            box-sizing: border-box;
+        }
+
+        .chat-container {
+            width: 100%;
+            /* max-width: 700px; */ /* You can set a max-width for the whole chat area if desired */
+            background-color: #ffffff;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .chat-header {
+            padding: 10px 15px;
+            border-bottom: 0.5px solid #c8c7cc;
+            font-size: 17px;
+            font-weight: 600;
+            color: #000000;
+            text-align: center;
+            position: sticky;
+            top: 0;
+            background-color: rgba(247, 247, 247, 0.85);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            z-index: 10;
+        }
+
+        .chat-messages {
+            flex-grow: 1;
+            padding: 15px 10px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .message-entry {
+            display: flex;
+            width: 100%;
+            margin-bottom: 2px;
+        }
+
+        /* "ME" - UserAgent - Messages on the RIGHT, Goldman Sachs Blue bubble */
+        .message-entry.user-agent {
+            justify-content: flex-end;
+        }
+        .message-entry.user-agent .message-bubble {
+            background-color: #0057A1; /* Goldman Sachs Blue */
+            color: white;
+            border-bottom-right-radius: 5px;
+            margin-left: auto;
+        }
+
+        /* "THEM" - TechAgent - Messages on the LEFT, GREY bubble */
+        .message-entry.tech-agent {
+            justify-content: flex-start;
+        }
+        .message-entry.tech-agent .message-bubble {
+            background-color: #e5e5ea; /* Light Grey */
+            color: #000000;
+            border-bottom-left-radius: 5px;
+            margin-right: auto;
+        }
+
+        .message-bubble {
+            padding: 9px 14px;
+            border-radius: 18px;
+            line-height: 1.35;
+            word-wrap: break-word;
+            font-size: 17px;
+            /* Reduce width by 20% means max-width is 80% of available space */
+            /* We'll use 75-80% of the parent .message-entry width */
+            max-width: 78%; /* Effectively reduces width, leaving ~22% empty on the other side */
+            box-shadow: 0 0.5px 0px rgba(0,0,0,0.08);
+            text-align: left; /* Text inside bubble is always left-aligned */
+        }
+
+    </style>
+</head>
+<body>
+
+<div class="chat-container">
+    <div class="chat-header" id="chatHeader">
+        Chat
+    </div>
+    <div class="chat-messages" id="chatMessages">
+        <!-- Messages will be injected here -->
+    </div>
+</div>
+
+<script>
+    const MY_SENDER_NAME = "UserAgent"; // <<< --- IMPORTANT: CONFIGURE THIS!
+
+    async function loadAndDisplayChat() {
+        const chatMessagesContainer = document.getElementById('chatMessages');
+        const chatHeader = document.getElementById('chatHeader');
+        let fileContentAsString;
+
+        const urlParams = new URLSearchParams(window.location.search);
+        const jsonlFile = urlParams.keys().next().value;
+
+        if (jsonlFile && (jsonlFile.endsWith('.jsonl') || jsonlFile.endsWith('.json'))) {
+            try {
+                const response = await fetch(jsonlFile);
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                fileContentAsString = await response.text();
+                const firstLine = fileContentAsString.split('\n')[0];
+                if(firstLine) {
+                    try {
+                        const firstMsg = JSON.parse(firstLine);
+                        if (firstMsg.sender !== MY_SENDER_NAME && firstMsg.sender) {
+                            chatHeader.textContent = firstMsg.sender;
+                        } else if (firstMsg.channel) {
+                             chatHeader.textContent = firstMsg.channel;
+                        } else { chatHeader.textContent = "Chat"; }
+                    } catch(e) { chatHeader.textContent = "Chat"; }
+                } else { chatHeader.textContent = "Chat"; }
+            } catch (error) {
+                console.error('Error loading JSONL file:', error);
+                chatMessagesContainer.innerHTML = `<p style="color: red; text-align: center;">Error loading ${jsonlFile}.</p>`;
+                fileContentAsString = getEmbeddedJsonLData();
+                chatHeader.textContent = `Chat (Embedded)`;
+            }
+        } else {
+            fileContentAsString = getEmbeddedJsonLData();
+            chatHeader.textContent = `Chat (Embedded)`;
+        }
+
+        if (!fileContentAsString) return;
+
+        const lines = fileContentAsString.trim().split('\n');
+        const messages = [];
+        for (const line of lines) {
+            const trimmedLine = line.trim();
+            if (trimmedLine) {
+                try { messages.push(JSON.parse(trimmedLine)); }
+                catch (e) { console.warn("Skipping invalid JSON line:", trimmedLine, e); }
+            }
+        }
+
+        if (messages.length === 0) {
+             chatMessagesContainer.innerHTML = `<p style="color: orange; text-align: center;">No valid messages.</p>`;
+            return;
+        }
+
+        messages.forEach(msg => {
+            if (!msg || typeof msg.sender === 'undefined' || !msg.text || !msg.timestamp) {
+                console.warn("Skipping malformed message:", msg); return;
+            }
+
+            const messageEntry = document.createElement('div');
+            messageEntry.classList.add('message-entry');
+
+            if (msg.sender === MY_SENDER_NAME) {
+                messageEntry.classList.add('user-agent');
+            } else {
+                messageEntry.classList.add('tech-agent');
+            }
+
+            const messageBubble = document.createElement('div');
+            messageBubble.classList.add('message-bubble');
+            messageBubble.textContent = msg.text;
+            messageEntry.appendChild(messageBubble);
+            chatMessagesContainer.appendChild(messageEntry);
+        });
+        chatMessagesContainer.scrollTop = chatMessagesContainer.scrollHeight;
+    }
+
+    function getEmbeddedJsonLData() {
+        // UserAgent will be Goldman Sachs Blue/RIGHT, TechAgent will be GREY/LEFT
+        // Make sure MY_SENDER_NAME matches the sender you want on the right
+        return `{"sender":"TechAgent","channel":"support-channel","text":"Hey! How's it going? This is a slightly longer message to see how it wraps when it's on the left side of the screen.","timestamp":"2025-05-14T13:54:00.841406Z"}
+{"sender":"UserAgent","channel":"support-channel","text":"Doing well, thanks for asking! Just working on a few things. This response should be styled with the new blue color and be on the right.","timestamp":"2025-05-14T13:54:15.930553Z"}
+{"sender":"TechAgent","channel":"support-channel","text":"Pretty good. I am in class. Where are you?","timestamp":"2025-05-14T13:54:30.227069Z"}
+{"sender":"UserAgent","channel":"support-channel","text":"I'm at the office today. Getting a lot done.","timestamp":"2025-05-14T13:54:45.123456Z"}
+{"sender":"TechAgent","channel":"support-channel","text":"What are you working on that's so engaging?","timestamp":"2025-05-14T13:55:00.623511Z"}
+{"sender":"UserAgent","channel":"support-channel","text":"Just finalizing some reports. This is the final test of a long message on the right with the new color scheme to ensure it uses the available space correctly, but not too much space.","timestamp":"2025-05-14T13:55:15.750190Z"}
+{"sender":"TechAgent","channel":"support-channel","text":"Sounds productive! We should connect later.","timestamp":"2025-05-14T13:55:30.287099Z"}`;
+    }
+
+    document.addEventListener('DOMContentLoaded', loadAndDisplayChat);
+</script>
+</body>
+</html>
