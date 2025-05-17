@@ -2,13 +2,11 @@ package com.example.agency.agents;
 
 import com.example.agency.BaseLlmAgent;
 import com.example.agency.bus.Source;
-import com.example.scrum.llm.LlamaLanguageModelWrapper;
+import com.example.scrum.llm.LlamaLanguageModelWrapper; // Ensure this is the correct wrapper
 import com.example.scrum.tools.MSTeamsTool;
 import com.example.agency.util.AgentActivityLogger;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import dev.langchain4j.data.message.AiMessage;
-import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.memory.ChatMemory;
@@ -17,57 +15,41 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.util.List;
 import java.util.Map;
-import java.util.Set;
-import java.util.HashSet;
-import java.util.stream.Collectors;
 
-public class UserAgent extends BaseLlmAgent {
-    private static final Logger log = LoggerFactory.getLogger(UserAgent.class);
-    private final String agentName = "UserAgent";
+public class TechAgent extends BaseLlmAgent {
+    private static final Logger log = LoggerFactory.getLogger(TechAgent.class);
+    private final String agentName = "TechAgent";
     private final Source.TaskQueue myQueue;
     private final Source.FileSource eventBus;
     private final MSTeamsTool teamsTool;
     private final ObjectMapper objectMapper = new ObjectMapper();
-
-    private int solutionsTriedThisConversation = 0;
-    private final int MAX_SOLUTIONS_TO_TRY = 3; // Max attempts before "escalation"
-    private final String TECH_AGENT_NAME = "TechAgent";
+    private final String USER_AGENT_NAME = "UserAgent";
     private static final String SHARED_CHANNEL = "support-channel";
-    private boolean conversationActive = false;
 
-    // SYSTEM PROMPT to guide the LLM to act as a frustrated UserAgent
-    private static final String SYSTEM_PROMPT_USER_AGENT_FRUSTRATED =
-            "YOU ARE UserAgent. You are currently very frustrated because you are having a login issue with 'System A' and TechAgent's suggestions are not working. " +
-                    "You are messaging TechAgent on the '" + SHARED_CHANNEL + "' channel. " +
-                    "Your response MUST BE ONLY the direct text you send to TechAgent. " +
-                    "DO NOT explain yourself, DO NOT use markdown, DO NOT use professional or overly polite language. Show your increasing annoyance and impatience. " +
-                    "If a suggestion fails, clearly state it failed and demand a new, better idea. " +
-                    "If it's the final attempt, express extreme frustration and state you are escalating.";
+    private static final String SYSTEM_PROMPT =
+            "YOU ARE TechAgent on channel '" + SHARED_CHANNEL + "'. You are helping UserAgent with a login issue. " +
+                    "Your response MUST be ONLY the direct text of the *single message* you send back to UserAgent. " +
+                    "This message should be a concrete, actionable troubleshooting step OR a single clarifying question. " +
+                    "UserAgent will tell you if your previous suggestion failed; if so, offer a NEW, DIFFERENT idea. " +
+                    "DO NOT greet, sign-off, explain yourself, or use markdown. Just the troubleshooting message or question. Be concise.";
 
-    public UserAgent(LanguageModel llm, ChatMemory memory, Source.FileSource eventBus, MSTeamsTool msTeamsTool) {
-        super(llm, memory); // ChatMemory will be used to provide context to the LLM
+    public TechAgent(LanguageModel llm, ChatMemory memory, Source.FileSource eventBus, MSTeamsTool msTeamsTool) {
+        super(llm, memory);
         this.myQueue = new Source.TaskQueue(agentName);
         this.myQueue.subscribe(this::handleTask);
         this.teamsTool = msTeamsTool;
         this.eventBus = eventBus;
-        AgentActivityLogger.logAction(agentName, "Initialization", agentName + " initialized (LLM-driven replies, frustrated persona).");
+        AgentActivityLogger.logAction(agentName, "Initialization", agentName + " initialized.");
     }
 
-    private String cleanLlmUserAgentMessage(String rawOutput) {
+    private String cleanLlmMessage(String rawOutput, String userAgentLastMessage) {
         String message = rawOutput;
-        if (message == null) return "This isn't working!"; // Fallback for null
-
         int eotIndex = message.indexOf("<|eot_id|>");
         if (eotIndex != -1) message = message.substring(0, eotIndex);
         message = message.replaceAll("<\\|.*?\\|>", "").trim();
-
-        // Remove instructions or meta-comments from LLM
-        message = message.replaceAll("(?im)^UserAgent says:|^UserAgent would angrily state:|^Okay, my frustrated message is:|^Here's what UserAgent sends:\\s*", "").trim();
-        message = message.replaceAll("(?im)^UserAgent:", "").trim();
-
-        // Remove surrounding quotes if the entire message is quoted
+        message = message.replaceAll("(?im)^TechAgent should reply with:|^TechAgent's response:|^As TechAgent, I would suggest:|^My suggestion is:|^You should tell UserAgent:|^Here's a troubleshooting step:\\s*", "").trim();
+        message = message.replaceAll("(?im)^TechAgent:|^Message to UserAgent:\\s*", "").trim();
         if (message.startsWith("\"") && message.endsWith("\"") && message.length() > 1) {
             message = message.substring(1, message.length() - 1);
         }
@@ -75,104 +57,51 @@ public class UserAgent extends BaseLlmAgent {
             message = message.substring(1, message.length() - 1);
         }
         message = message.trim();
-
         if (message.isEmpty()) {
-            return "This is ridiculous! Still not working! What now?!"; // More frustrated fallback
+            log.warn("{} LLM produced empty message after cleaning for UserAgent's message: '{}'. Using fallback.", agentName, userAgentLastMessage);
+            if (userAgentLastMessage.toLowerCase().contains("help") || userAgentLastMessage.toLowerCase().contains("problem")) {
+                return "Okay, I can help with that. Could you please tell me the exact error message you are seeing?";
+            } else if (userAgentLastMessage.toLowerCase().contains("didn't work") || userAgentLastMessage.toLowerCase().contains("failed")) {
+                return "I see. Let's try something else. Have you tried clearing your browser cache and cookies?";
+            } else {
+                return "Can you please provide more details about the issue?";
+            }
         }
         return message;
     }
 
     private void handleTask(String rawTask) {
         AgentActivityLogger.logTaskReceived(agentName, rawTask);
+        // No need to clear memory here if each interaction is stateless for the LLM call
+        // this.memory.clear();
+        // this.memory.add(new SystemMessage(SYSTEM_PROMPT)); // System prompt is passed directly
 
-        String userPromptForLLM; // This is the instruction to our LLM on how UserAgent should behave
-        String messageToSendToTechAgent;
+        String userAgentMessageText;
 
-        if (rawTask.startsWith("StartLoginIssueConversation")) {
-            if (conversationActive) {
-                AgentActivityLogger.logAction(agentName, rawTask, "Conversation already active. Ignoring.");
-                return;
-            }
-            conversationActive = true;
-            solutionsTriedThisConversation = 0;
-            this.memory.clear(); // Fresh conversation history for the LLM
-
-            // Initial message is still pre-defined for consistency
-            messageToSendToTechAgent = "Hi TechAgent, I'm having trouble logging into System A. My password isn't working even after a reset and I'm seeing an error. Can you help already?!";
-            AgentActivityLogger.logAction(agentName, rawTask, "Initiating login issue (frustrated). Sending: '" + messageToSendToTechAgent + "'");
-
-            // Add this first UserAgent message to its own memory as if it said it
-            this.memory.add(new UserMessage(messageToSendToTechAgent));
-
-        } else if (rawTask.startsWith("ProcessNewSlackMessage:")) {
-            if (!conversationActive) {
-                log.warn("{} received ProcessNewSlackMessage but no conversation is active. Ignoring.", agentName);
-                return;
-            }
+        if (rawTask.startsWith("ProcessNewSlackMessage:")) {
             try {
                 String taskJson = rawTask.substring("ProcessNewSlackMessage:".length());
                 JsonNode taskNode = objectMapper.readTree(taskJson);
-                // ... (parsing channel, originalSender as before) ...
+                String channel = taskNode.path("channel").asText();
                 String originalSender = taskNode.path("originalSender").asText();
-                if (!TECH_AGENT_NAME.equals(originalSender)) return;
 
-
-                Map<String, Object> lastMessageData = teamsTool.readLastMessageFromSender(SHARED_CHANNEL, TECH_AGENT_NAME);
-                String receivedTextFromTechAgent = (String) lastMessageData.getOrDefault("text", "TechAgent's last suggestion was garbled.");
-                AgentActivityLogger.logAction(agentName, rawTask, "Processing TechAgent's suggestion (" + (solutionsTriedThisConversation + 1) + "): '" + receivedTextFromTechAgent + "'");
-
-                // Add TechAgent's message to UserAgent's LLM memory
-                this.memory.add(new AiMessage(receivedTextFromTechAgent)); // TechAgent is like the "AI" in this context for UserAgent's LLM
-
-                solutionsTriedThisConversation++;
-
-                if (solutionsTriedThisConversation >= MAX_SOLUTIONS_TO_TRY) {
-                    userPromptForLLM = String.format(
-                            "You are UserAgent, EXTREMELY frustrated. TechAgent's %dth suggestion ('%s') FAILED. " +
-                                    "Send a message to TechAgent on channel '%s' expressing extreme annoyance, stating this is the final attempt, and you're escalating if this doesn't work. Be blunt.",
-                            solutionsTriedThisConversation, receivedTextFromTechAgent, SHARED_CHANNEL
-                    );
-                } else {
-                    // For testing, let's assume it "works" on the 2nd try from TechAgent.
-                    boolean solutionWorkedThisTime = (solutionsTriedThisConversation == 2);
-                    if (solutionWorkedThisTime) {
-                        userPromptForLLM = String.format(
-                                "You are UserAgent. TechAgent's last suggestion ('%s') FINALLY worked after %d tries. " +
-                                        "Send a message to TechAgent on channel '%s' (still a bit annoyed it took so long) confirming it's resolved.",
-                                receivedTextFromTechAgent, solutionsTriedThisConversation, SHARED_CHANNEL
-                        );
-                    } else {
-                        userPromptForLLM = String.format(
-                                "You are UserAgent, getting more annoyed. TechAgent's suggestion ('%s') FAILED. This was attempt #%d. " +
-                                        "Send a message to TechAgent on channel '%s' stating it failed and demanding a DIFFERENT and BETTER idea. Show your impatience.",
-                                receivedTextFromTechAgent, solutionsTriedThisConversation, SHARED_CHANNEL
-                        );
-                    }
+                if (!SHARED_CHANNEL.equals(channel) || !USER_AGENT_NAME.equals(originalSender)) {
+                    log.warn("{} received message not from {} or not on {}. Ignoring.", agentName, USER_AGENT_NAME, SHARED_CHANNEL);
+                    return;
                 }
 
-                // Now, UserAgent uses its LLM to formulate its (frustrated) reply
-                this.memory.add(new SystemMessage(SYSTEM_PROMPT_USER_AGENT_FRUSTRATED)); // Ensure persona for this call
-                this.memory.add(new UserMessage(userPromptForLLM)); // This is the instruction for UserAgent's LLM
+                Map<String, Object> lastMessageData = teamsTool.readLastMessageFromSender(SHARED_CHANNEL, USER_AGENT_NAME);
+                userAgentMessageText = (String) lastMessageData.getOrDefault("text", "UserAgent's message was unclear or not found.");
+                AgentActivityLogger.logAction(agentName, rawTask, "Processing message from " + originalSender + ": '" + userAgentMessageText + "'");
 
-                dev.langchain4j.model.output.Response<String> llmResponse;
-                log.debug("{} sending to LLM with history size {}. User instruction: {}", agentName, this.memory.messages().size(), userPromptForLLM);
-                if (this.llm instanceof LlamaLanguageModelWrapper) {
-                    // For LlamaLanguageModelWrapper, we need to extract system and user prompts from memory if it expects that.
-                    // Or, if it can take full message list, we pass this.memory.messages().
-                    // Let's assume LlamaLanguageModelWrapper takes system + user for now.
-                    // The userPromptForLLM becomes the "current user message" for the wrapper.
-                    // The actual SYSTEM_PROMPT_USER_AGENT_FRUSTRATED is the system prompt.
-                    llmResponse = ((LlamaLanguageModelWrapper) this.llm).generate(SYSTEM_PROMPT_USER_AGENT_FRUSTRATED, userPromptForLLM, 70, 0.5f); // Higher temp for more varied frustration
-                } else {
-                    // Fallback if it's a generic ChatLanguageModel that takes List<ChatMessage>
-                    llmResponse = this.llm.generate(this.memory.toString());
+                if (userAgentMessageText.toLowerCase().contains("issue is resolved")) {
+                    AgentActivityLogger.logAction(agentName, rawTask, "UserAgent indicates issue resolved. No reply needed from TechAgent.");
+                    return;
                 }
-                String rawLlmOutput = (llmResponse != null && llmResponse.content() != null) ? llmResponse.content().trim() : "";
-                messageToSendToTechAgent = cleanLlmUserAgentMessage(rawLlmOutput);
-
-                // Add UserAgent's own (LLM-generated) message to its memory
-                this.memory.add(new UserMessage(messageToSendToTechAgent)); // It's a UserMessage from UserAgent's perspective
-
+                if (userAgentMessageText.toLowerCase().contains("escalate this")) {
+                    AgentActivityLogger.logAction(agentName, rawTask, "UserAgent is escalating. No further troubleshooting reply needed from TechAgent.");
+                    return;
+                }
             } catch (IOException e) {
                 AgentActivityLogger.logError(agentName, rawTask, "Failed to parse ProcessNewSlackMessage task", e);
                 return;
@@ -182,23 +111,39 @@ public class UserAgent extends BaseLlmAgent {
             return;
         }
 
-        // Send the determined/generated message
-        if (messageToSendToTechAgent != null) {
-            AgentActivityLogger.logAction(agentName, rawTask, agentName + " sending to " + TECH_AGENT_NAME + ": '" + messageToSendToTechAgent + "'");
-            teamsTool.recordMessageSent(SHARED_CHANNEL, agentName, messageToSendToTechAgent);
+        String llmUserPrompt = String.format(
+                "UserAgent on channel '%s' sent this message: \"%s\". " +
+                        "What is your concise, direct troubleshooting step or clarifying question to send back as TechAgent? Remember to offer a new idea if they said a previous one failed.",
+                SHARED_CHANNEL, userAgentMessageText
+        );
 
-            String eventPayload = String.format(
-                    "{\"channel\":\"%s\", \"sender\":\"%s\", \"recipient\":\"%s\"}",
-                    SHARED_CHANNEL, agentName, TECH_AGENT_NAME
-            );
-            eventBus.publish("NewSlackMessageEvent:" + eventPayload);
-            AgentActivityLogger.logAction(agentName, SHARED_CHANNEL, "Published NewSlackMessageEvent for " + TECH_AGENT_NAME);
-
-            if (messageToSendToTechAgent.toLowerCase().contains("resolved") ||
-                    (solutionsTriedThisConversation >= MAX_SOLUTIONS_TO_TRY && messageToSendToTechAgent.toLowerCase().contains("escalate"))) {
-                AgentActivityLogger.logAction(agentName, SHARED_CHANNEL, agentName + ": Conversation with TechAgent concluded.");
-                conversationActive = false;
-            }
+        // --- CORRECTED LLM CALL ---
+        dev.langchain4j.model.output.Response<String> llmResponse;
+        if (this.llm instanceof LlamaLanguageModelWrapper) {
+            // Use the specific generate method of LlamaLanguageModelWrapper
+            llmResponse = ((LlamaLanguageModelWrapper) this.llm).generate(SYSTEM_PROMPT, llmUserPrompt, 70, 0.2f); // Max new tokens, temp
+        } else {
+            // Fallback for generic LanguageModel (less ideal as it combines prompts)
+            log.warn("{} LLM is not LlamaLanguageModelWrapper. Combining prompts.", agentName);
+            this.memory.clear(); // Clear for combined prompt
+            this.memory.add(new SystemMessage(SYSTEM_PROMPT));
+            this.memory.add(new UserMessage(llmUserPrompt));
+            llmResponse = this.llm.generate(this.memory.messages().toString()); // This was the error line
         }
+        // --- END CORRECTION ---
+
+        String rawLlmMessageOutput = (llmResponse != null && llmResponse.content() != null) ? llmResponse.content().trim() : "";
+
+        String messageToSendToUserAgent = cleanLlmMessage(rawLlmMessageOutput, userAgentMessageText);
+        AgentActivityLogger.logAction(agentName, rawTask, agentName + " formulated message: '" + messageToSendToUserAgent + "'");
+
+        teamsTool.recordMessageSent(SHARED_CHANNEL, agentName, messageToSendToUserAgent);
+
+        String eventPayload = String.format(
+                "{\"channel\":\"%s\", \"sender\":\"%s\", \"recipient\":\"%s\"}",
+                SHARED_CHANNEL, agentName, USER_AGENT_NAME
+        );
+        eventBus.publish("NewSlackMessageEvent:" + eventPayload);
+        AgentActivityLogger.logAction(agentName, SHARED_CHANNEL, "Published NewSlackMessageEvent for " + USER_AGENT_NAME);
     }
 }

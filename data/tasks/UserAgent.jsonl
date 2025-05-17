@@ -28,3 +28,4 @@ ProcessNewSlackMessage:{"channel":"support-channel", "originalSender":"TechAgent
 ProcessNewSlackMessage:{"channel":"support-channel", "originalSender":"TechAgent"}
 ProcessNewSlackMessage:{"channel":"support-channel", "originalSender":"TechAgent"}
 ProcessNewSlackMessage:{"channel":"support-channel", "originalSender":"TechAgent"}
+StartLoginIssueConversation

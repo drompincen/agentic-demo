@@ -1,0 +1,307 @@
+Slide 1: Title Slide
+Agentic Programming with 100% Java Inference
+Featuring Llama3.java & Langchain4j
+(Your Name/Team)
+(Date)
+Slide 2: The Challenge: Bridging Local LLMs with Agent Frameworks
+Goal: Demonstrate autonomous agents using locally run Llama3.java.
+Key Library: mukel/llama3.java for direct GGUF model inference.
+Framework: Langchain4j for agentic patterns (memory, tools, prompts).
+Problem: How to make llama3.java a "pluggable" engine for Langchain4j?
+Slide 3: 1. Wrapping Llama3.java for Langchain4j
+LlamaService.java (The Core Inference Engine)
+Directly uses mukel/llama3.java components.
+Handles model loading, tokenization, and generation.
+// LlamaService.java - Simplified
+public class LlamaService {
+    private final Llama model; // from mukel/llama3.java
+    private final ChatFormat chatFormat;
+
+    public LlamaService(String modelPath) throws IOException {
+        this.model = ModelLoader.loadModel(Path.of(modelPath), ...);
+        this.chatFormat = new ChatFormat(this.model.tokenizer());
+    }
+
+    public String generateResponse(String systemPrompt, String userPrompt,
+                                   int maxNewTokens, float temperature) {
+        // ... format prompts using chatFormat ...
+        List<Integer> formattedTokens = ...;
+
+        // ... call Llama.generateTokens ...
+        List<Integer> responseTokens = Llama.generateTokens(
+                model, state, ..., formattedTokens, ...);
+
+        return model.tokenizer().decode(responseTokens);
+    }
+}
+
+Java
+(Font: Medium-Large)
+Slide 4: 1. Wrapping Llama3.java (Continued)
+LlamaLanguageModelWrapper.java (The Langchain4j Adapter)
+Implements ChatLanguageModel from Langchain4j.
+Internally uses LlamaService for local mode.
+Can switch to a remote OpenAiChatModel via config.
+// LlamaLanguageModelWrapper.java - Key Parts
+public class LlamaLanguageModelWrapper implements ChatLanguageModel {
+    private final String provider; // "local" or "remote"
+    private LlamaService localLlamaService;
+    private ChatLanguageModel remoteChatModel; // e.g., OpenAiChatModel
+
+    public LlamaLanguageModelWrapper(AppConfig config) {
+        this.provider = config.getLlmProvider();
+        if ("local".equals(provider)) {
+            this.localLlamaService = new LlamaService(config.getLocalModelPath());
+        } else {
+            this.remoteChatModel = OpenAiChatModel.builder()...build();
+        }
+    }
+
+    @Override
+    public Response<AiMessage> generate(List<ChatMessage> messages) {
+        if ("local".equals(provider)) {
+            // Extract system/user from messages, call localLlamaService
+            String system = ...; String user = ...;
+            String text = localLlamaService.generateResponse(system, user, ...);
+            return Response.from(AiMessage.from(text), ...);
+        } else {
+            return remoteChatModel.generate(messages);
+        }
+    }
+}
+
+Java
+(Font: Medium-Large)
+Slide 5: 2. Leveraging Langchain4j: Memory
+BaseLlmAgent.java & Agent-Specific Memory
+Agents use ChatMemory (e.g., MessageWindowChatMemory).
+Langchain4j handles storing and retrieving conversation history.
+// BaseLlmAgent.java - Constructor
+public abstract class BaseLlmAgent {
+    protected final ChatLanguageModel chatModel; // Our Wrapper!
+    protected final ChatMemory memory;
+
+    protected BaseLlmAgent(ChatLanguageModel chatModel, ChatMemory memory) {
+        this.chatModel = chatModel;
+        this.memory = memory;
+    }
+}
+
+// AgencyApp.java - Agent Initialization
+ChatMemory techAgentMemory = MessageWindowChatMemory.withMaxMessages(15);
+new TechAgent(chatModel, techAgentMemory, ...);
+
+Java
+In GroomingAgent.java's processLLMInteraction:
+// GroomingAgent.java - Using Memory
+this.memory.clear(); // Or manage context more selectively
+this.memory.add(new SystemMessage(systemPromptText));
+this.memory.add(new UserMessage(currentUserMessageText));
+
+// ... LLM call ...
+// llmResponse = chatModel.generate(this.memory.messages()); // If wrapper passed List
+Response<String> llmResponse = ((LlamaLanguageModelWrapper) this.llm)
+        .generate(systemPromptText, currentUserMessageText, ...); // Current way
+
+this.memory.add(new AiMessage(llmResponse.content()));
+
+Java
+(Font: Medium-Large)
+(Note: The GroomingAgent's processLLMInteraction still uses the older LanguageModel generate. Adapting it fully to ChatLanguageModel's generate(List<ChatMessage>) would be cleaner for this slide, but showing current code is also fine if you explain the transition).
+Slide 6: 3. Separating Prompts from Code
+Constants for System Prompts in Agents
+Prompts are defined as static final String constants.
+Keeps complex instructions out of the main logic flow.
+Easier to version and manage.
+// GroomingAgent.java - System Prompts
+public class GroomingAgent extends BaseLlmAgent {
+    // ...
+    private static final String SYSTEM_PROMPT_TICKET_ANALYSIS =
+            "You are an agile evangelist. Analyze Jira ticket details..." +
+            "tell me how can this ticket be better phrased or if it is " +
+            "missing information like criteria for success...";
+
+    private static final String SYSTEM_PROMPT_REPORTING =
+            "You are JiraBot. I will provide a summary... Your ONLY task is " +
+            "to provide the command to send this summary via MS Teams...";
+    // ...
+}
+
+// TechAgent.java - System Prompt
+public class TechAgent extends BaseLlmAgent {
+    // ...
+    private static final String SYSTEM_PROMPT =
+        "YOU ARE TechAgent... Your response MUST be ONLY the direct text " +
+        "of the *single message* you send back to UserAgent...";
+    // ...
+}
+
+Java
+(Font: Large)
+Slide 7: 4. Using Tools Effectively (Intent & Execution)
+Concept: LLM Decides What to Do, Tools How to Do It
+Tool Definition: JiraTool.java, MSTeamsTool.java (not shown in detail, but mention they exist).
+Prompt Engineering: LLM is asked to output a command.
+Parsing: NaturalLanguageToolParser.java (simple regex/keyword based).
+Dispatching: IntentHandler.java executes the parsed command.
+// GroomingAgent.java - Prompting for a command
+String userPromptForLlm = String.format(
+    "Analyze ticket '%s'. Details: ... \n" +
+    "If this ticket is perfectly ready ..., respond ONLY with: " +
+    "'Set needsGrooming for ticket %s to false.' " +
+    "Otherwise, concisely describe what's missing...",
+    ticketId, detailsJson, ticketId);
+
+// GroomingAgent.java - Parsing and Executing
+ToolIntent intent = NaturalLanguageToolParser.parse(llmOutputText);
+
+if (intent.isToolIdentified()) {
+    String toolResult = intentHandler.executeIntent(intent, agentContext);
+    AgentActivityLogger.logToolExecution(agentName, ..., intent.toolName(), ...);
+
+    // Example: if JIRA tool was used to mark ticket as groomed
+    if ("JIRA_updateTicket".equals(intent.toolName()) &&
+        "needsGrooming".equals(intent.arguments().get("fieldName"))) {
+        // ... update state, move to next ticket ...
+    }
+} else {
+    // LLM gave natural language advice, not a command
+    // ... post advice to Teams ...
+}
+
+Java
+(Font: Medium-Large)
+Slide 8: 5. Retry & Fallback Mechanisms
+Handling LLM Failures or Unexpected Output
+Cleaning Output: TechAgent.cleanLlmMessage() tries to sanitize LLM text.
+Fallback Responses: If cleaning results in an empty message.
+Re-analysis Loop: GroomingAgent can re-prompt LLM after a tool action.
+Error Logging: AgentActivityLogger helps track issues.
+// TechAgent.java - Cleaning and Fallback
+private String cleanLlmMessage(String rawOutput, String userAgentLastMessage) {
+    // ... regex replacements, trimming ...
+    message = message.trim();
+    if (message.isEmpty()) {
+        log.warn("{} LLM produced empty message... Using fallback.", agentName);
+        if (userAgentLastMessage.toLowerCase().contains("help")) {
+            return "Okay, I can help. What's the exact error?";
+        } // ... other fallback conditions ...
+        return "Can you provide more details?";
+    }
+    return message;
+}
+
+// GroomingAgent.java - Re-prompting after tool use
+// (Conceptual - If LLM updated a ticket description, then:)
+String nextUserPrompt = String.format(
+    "Task: Re-analyze ticket '%s' after your last action... " +
+    "If it's now perfectly ready, command 'Set needsGrooming...'", ...);
+processLLMInteraction(nextUserPrompt, ...); // Calls LLM again
+
+Java
+(Font: Medium-Large)
+Slide 9: 5. Retry & Fallback (Grooming Agent Report Example)
+If LLM Fails to Generate a Reporting Command:
+The agent can attempt to extract the summary from its own memory.
+Then, directly use a tool with a default command.
+// GroomingAgent.java - processLLMInteraction for Reporting
+// ... after LLM call ...
+if (intent.isToolIdentified()) {
+    // LLM gave a command, execute it
+} else { // No specific tool intent from LLM for the report
+    if (originalTaskContext.startsWith("ReportFor_")) {
+        AgentActivityLogger.logError(agentName, ...,
+            "LLM failed to provide a command to send the report...");
+
+        String fallbackMessage = "Fallback Report for " +
+            this.currentCycleProjectKey + ": " +
+            extractSummaryFromPreviousUserMessage(); // Pulls from memory
+
+        String defaultReportChannel = ...;
+        msTeamsTool.sendMessage(defaultReportChannel, fallbackMessage); // Direct tool call
+        AgentActivityLogger.logAction(agentName, ...,
+            "Sent report via fallback due to LLM command failure.");
+    }
+    // ...
+}
+
+Java
+(Font: Medium-Large)
+Slide 10: Key Takeaways & Demo
+100% Java Inference is Feasible: Llama3.java provides the core.
+Langchain4j is Powerful: ChatLanguageModel, ChatMemory, and agent patterns are invaluable.
+Wrappers are Key: Abstracting the inference engine allows flexibility (local vs. remote).
+Prompt Engineering is Crucial: Guiding the LLM to produce actionable output (like commands).
+Robustness Matters: Plan for LLM quirks with cleaning, fallbacks, and retries.
+(Now, switch to your live demo!)
+Tips for Presentation:
+Keep Code Snippets Short: Focus on the most illustrative lines. Use "..." to omit less relevant parts.
+Highlight Key Lines: If your presentation tool allows, bold or color the most important lines within a code block.
+Explain the "Why": Don't just show code; explain why it's structured that way and what problem it solves.
+Relate to Objectives: Explicitly link each code slide back to one of your 5 main objectives.
+Font Size: Aim for readability from the back of the room. What I've termed "Large" or "Medium-Large" here is a relative guide.
+Pacing: Don't rush through the code. Give the audience a moment to absorb it.
+-----------------
+Option 1: Dedicated Slide after "Using Tools Effectively" or as part of "Key Takeaways"
+Slide X: The Agentic Shift: Inversion of Control
+Traditional Software: Developers explicitly define workflows, control flow (if/else, loops, sequences). The code dictates the steps.
+// Traditional
+if (userAction == "SAVE_DOCUMENT") {
+    validateDocument();
+    saveToDatabase();
+    notifyUser();
+}
+Use code with caution.
+Agentic Programming: The LLM, guided by prompts and available tools, dictates the workflow. Control is "inverted."
+We don't hardcode: "IF ticket is missing description, THEN ask LLM to update description."
+Instead: "HERE is a ticket. HERE are tools (updateDesc, addComment, setGroomed). LLM, what's the next best action/command?"
+// GroomingAgent.java - LLM Decides Next Step
+// User prompt describes current state & overall goal
+String userPromptForLlm = String.format(
+    "Analyze ticket '%s'. Details: ... \n" +
+    "If perfectly ready, command 'Set needsGrooming for ticket %s to false.' " +
+    "Otherwise, describe what's missing OR command an update.", ...);
+
+// LLM Response (example - could be different each time for same input based on model state/reasoning)
+// -> "Update ticket OMEGA-123 field description to 'Add acceptance criteria.'"
+// -> "Add comment to ticket OMEGA-123: 'Missing assignee. Who should take this?'"
+// -> "Set needsGrooming for ticket OMEGA-123 to false."
+
+// Code *reacts* to LLM's chosen command
+ToolIntent intent = NaturalLanguageToolParser.parse(llmOutputText);
+if (intent.isToolIdentified()) {
+    intentHandler.executeIntent(intent, ...); // Execute what LLM decided
+} else {
+    // Handle LLM's natural language advice
+}
+Use code with caution.
+Java
+(Font: Medium-Large for code, Large for bullet points)
+Key Idea: The application provides capabilities (tools, ability to query LLM) and context. The LLM acts as the dynamic "brain," orchestrating the sequence of operations. This allows for more flexible and adaptive workflows not explicitly pre-programmed.
+Option 2: Integrating into "Key Takeaways"
+Slide 10: Key Takeaways & Demo (Revised)
+100% Java Inference is Feasible: Llama3.java provides the core.
+Langchain4j is Powerful: ChatLanguageModel, ChatMemory, agent patterns.
+Wrappers are Key: Abstracting inference allows local/remote flexibility.
+Prompt Engineering is Crucial: Guiding LLM for actionable output.
+Embrace Inversion of Control:
+Traditional: Code defines workflow.
+Agentic: LLM, given context and tools, chooses the next step.
+Your code provides capabilities; the LLM orchestrates.
+Robustness Matters: Fallbacks, cleaning, retries for LLM unpredictability.
+(Now, switch to your live demo!)
+Talking Points for Inversion of Control:
+Flexibility & Adaptability:
+"Unlike traditional programs where every step is meticulously coded, agentic systems defer much of the 'what to do next' decision to the LLM."
+"This means the agent can potentially handle situations or sequences we didn't explicitly foresee, as long as it has the right tools and context."
+Role of the Developer Shifts:
+"Our job becomes less about scripting exact sequences and more about:
+Clearly defining the agent's purpose (via system prompts).
+Providing good context (current state, history).
+Equipping it with effective tools (well-defined functions it can call).
+Interpreting its intentions (parsing LLM output into actionable commands)."
+Emergent Behavior:
+"The 'workflow' isn't explicitly coded; it emerges from the LLM's reasoning based on the prompt, tools, and current situation."
+"This is powerful but also means testing is different – you're testing the LLM's ability to reason and choose correctly within the bounds you've set."
+Example from Your Code:
+"In the GroomingAgent, we don't have a giant switch statement saying 'if description is bad, do X, if assignee missing, do Y'. We present the ticket details and ask the LLM to analyze and decide whether to mark it groomed, suggest a fix, or identify what's missing. The LLM's output then drives the next tool call or communication."
