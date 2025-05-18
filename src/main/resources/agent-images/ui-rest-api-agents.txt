@@ -1,0 +1,85 @@
+Pain Points with Traditional UI Testing
+
+Endless maintenance as selectors change, layouts shift, CSS classes update
+
+Slow feedback loops—every test runs in a real browser session
+
+Limited visibility: hard to simulate edge cases or back-end failures
+
+High infrastructure cost for scale (grid servers, VMs, Docker images)
+
+Browser-Use Discovery (Interim Step)
+
+Agents “watch” real UI interactions to auto-generate test scenarios
+
+Pros: less manual scripting, automatic scenario extraction
+
+Cons: still bound to browser limitations—rendering quirks, slow execution
+
+SDK-Based Testing with Playwright/Selenium Layer
+
+Developers build a rich UI SDK on top of Playwright drivers
+
+Agent uses SDK methods (e.g., login(), submitOrder()) instead of raw DOM queries
+
+Gains: more stability, clearer intent, auto-doc generation
+
+But: still tied to GUI workflows and rendering pipelines
+
+The API-First, Agentic Workflow
+
+Developers own both UI and REST API definitions; we can skip the UI
+
+Agents read API docs directly and issue HTTP calls to perform actions
+
+Example flow:
+
+Agent reads “Create Ticket” endpoint spec
+
+Agent invokes POST /api/tickets with JSON payload
+
+Agent polls GET /api/tickets/{id} for status
+
+Agent documents request/response and generates training material
+
+Advantages of API-Driven Agents
+
+Speed: HTTP calls complete in milliseconds vs. seconds in a browser
+
+Reliability: no flaky selectors or layout dependencies
+
+Power: access hidden or administrative endpoints not exposed in UI
+
+Transparency: all interactions logged as structured JSON for auditing
+
+Cost: minimal infra—no browser grid, no headless Chrome binaries
+
+Story Arc (Slide Flow)
+
+Slide “Why UI Tests Break”: show real-world failure examples
+
+Slide “Browser-Use Discovery”: demo auto-scenario generation
+
+Slide “SDK Layer”: illustrate bean using SDK to drive tests
+
+Slide “API-First Agents”: reveal ultimate workflow, bean bypassing UI
+
+Slide “Results”: benchmarks on speed, flakiness reduction, maintenance drop
+
+Slide “Next Steps”: how we build API specs, agent prompts, run in CI/CD
+
+Conclusion & Call to Action
+
+“Let’s empower our agents with APIs, not browsers.”
+
+“By leaning fully into agentic, API-driven workflows, we free developers from brittle UI tests and accelerate delivery.”
+
+“Next: draft API contracts, write agent prompts, and watch tests write themselves.”
+
+
+
+
+
+
+
+
